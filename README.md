@@ -2,6 +2,8 @@
 
 ## **Problem statement:** How can household energy consumption be classified into low, medium, and high demand levels to enable cost optimization?
 
+<<<<<<< HEAD
+
 > Goal: Classify hourly/instantaneous demand as Low/Medium/High in a way that reflects baseline usage patterns and dynamic electricity pricing, so a fuzzy-logic scheduler can shift deferrable loads and reduce peak demand and cost.
 
 ---
