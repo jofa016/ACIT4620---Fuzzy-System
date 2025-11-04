@@ -1,9 +1,0 @@
-# Ignore all .dat files
-*.dat
-
-# Ignore PyCharm project settings
-.idea/
-
-# Ignore everything in data except the .gitkeep file
-data/preprocessed_data/ukdale/*
-!data/.gitkeep
