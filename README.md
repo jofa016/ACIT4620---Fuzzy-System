@@ -1,50 +1,116 @@
-# Fuzzy Demand Classification & Scheduling
+# Fuzzy Main Notebook Overview
 
-## **Problem statement:** How can household energy consumption be classified into low, medium, and high demand levels to enable cost optimization?
+This README summarizes the logic, workflow, and key components implemented in `fuzzy_main.ipynb`, which builds a fuzzy logic layer over household energy usage and electricity spot prices.
 
-<<<<<<< HEAD
-> **Goal:** How can household energy consumption patterns be classified into Low, Medium, and High demand levels in a way that reflects both temporal usage variations and dynamic electricity pricing, so that fuzzy logic–based scheduling can enable cost optimization and reduce peak demand?
+## 1. Purpose
 
+Model household lighting/activity patterns and electricity prices using fuzzy sets, derive interpretable rule-based outputs (energy waste, habit cost, efficiency), and convert them to crisp scores for analysis and visualization.
 
+## 2. Data Inputs
 
-| Step | Concept                        | What it means                                         | This project  (now example text)                                 |
-| ---- | ------------------------------ | ----------------------------------------------------- |------------------------------------------------------------------|
-| 1    | **Fuzzy sets**                 | Define vague categories                               | “Low power”, “Medium power”, “High power”                        |
-| 2    | **Membership functions (MFs)** | Translate numbers into degrees of belonging (0–1)     | Power = 1200 W → µ_high = 0.8                                    |
-| 3    | **Linguistic variables**       | Human-friendly variables that use fuzzy sets          | “Power usage” = {low, medium, high}                              |
-| 4    | **Fuzzification**              | Convert crisp inputs (Watts) → fuzzy memberships      | You already did this: `fuzzy_data`                               |
-| 5    | **Inference (reasoning)**      | Apply fuzzy **rules** to derive new fuzzy conclusions | “If kitchen is high AND lights are medium → activity is cooking” |
-| 6    | **Defuzzification**            | Convert fuzzy outputs → crisp values                  | “Activity level = 73/100 (high)”                                 |
-=======
-Goal: Classify hourly/instantaneous demand as Low/Medium/High in a way that reflects baseline usage patterns and dynamic electricity pricing, so a fuzzy-logic scheduler can shift deferrable loads and reduce peak demand and cost.
+Primary inputs originate from cleaned minute appliance data and spot price series. Core columns used:
 
----
+- `kitchen_lights`, `lounge_lights`: aggregated light power/activity proxies.
+- `kitchen_activity`, `lounge_activity`: appliance-derived activity indicators.
+- `spot_price`: electricity price (normalized/scaled).
+- Time attributes: `hour`, `day`, `month`.
 
-## Project overview (what this repo does)
+## 3. Fuzzification
 
-- Load minute-level house data and compute hour-of-day baselines using percentiles (P20, P50, P80).
-- Build a fuzzy demand classifier with inputs: relative load (vs hourly baseline), load trend, and price level.
-- Estimate a demand index (0–100), then map to categories: Low (<35), Medium (35–70), High (>70).
-- Simulate a simple scheduling policy for deferrable loads (e.g., washer/dishwasher) from peak-price/high-demand hours to off-peak/loWe use fuzzy sets for: relative load vs baseline {low, medium, high}, ,load trend {falling, stable, rising}, price level {low, medium, high}, output demand {low, medium, high}. For absolute categories(e.g., kitchen, living room, bedroom), we also used {low, medium, high}.
+Triangular membership functions convert numeric columns to linguistic labels (overlapping for smooth transitions). Examples:
 
----
+- Lights: off / low / medium / high.
+- Activity: low / medium / high (plus derived none via NOT of any activity labels).
+- Time-of-day: night / morning / afternoon / evening.
+- Spot price: low / medium / high.
 
-## Core fuzzy concepts — mapped to this project
+Implementation pattern:
 
-| Step | Concept                        | What it means                                             | This project (how it’s used)                                                                                                                                                                                                                                                                                 |
-| ---- | ------------------------------ | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 1    | **Fuzzy sets**                 | Vague categories with soft boundaries                     | We use sets for: relative load vs baseline {low, medium, high}, load trend {falling, stable, rising}, price level {low, medium, high}, and output demand {low, medium, high}. (Optional appliance labeling uses {off, low, medium, high} on absolute power.)                                                 |
-| 2    | **Membership functions (MFs)** | Map a number → degree in [0–1] for each set               | Each set is shaped by triangles/trapezoids. We use: rel_load (−2000…2000 W) low=trapmf[−2000,−2000,−200,−20], med=trimf[−200,0,200], high=trapmf[20,200,2000,2000]; trend (−600…600 W) falling/stable/rising with width w learned from data; price {1,2,3} low/med/high; output demand (0–100) low/med/high. |
-| 3    | **Linguistic variables**       | Human-friendly variables that use fuzzy sets              | Inputs: rel_load, load_trend, price_level. Output: demand (index 0–100) and bucket {Low, Medium, High}.                                                                                                                                                                                                      |
-| 4    | **Fuzzification**              | Convert crisp inputs (Watts) → fuzzy memberships          | For each timestamp: rel_load = aggregate − P50(hour); trend = rolling_5min − rolling_30min; price_level ∈ {1,2,3}. Evaluate their MFs to get degrees (e.g., μ_rel_high=0.7).                                                                                                                                 |
-| 5    | **Inference (reasoning)**      | Apply fuzzy if-Then rules to fuzzy input and fuzzy output | Rules combine inputs, e.g., (price high ∧ rel_load high) → demand high; (price low ∧ rel_load low) → demand low; (rel_load med ∧ trend stable) → demand med.                                                                                                                                                 |
-| 6    | **Defuzzification**            | Convert fuzzy outputs → a crisp value                     | Aggregate output sets and compute the centroid → demand_index ∈ [0,100], then bucket: Low <35, Medium 35–70, High >70.                                                                                                                                                                                       |
+1. Define (a, b, c) triples per label.
+2. Generate a synthetic `x` range (linspace) only for plotting membership curves.
+3. Apply a vectorized `triangular_membership(x, a, b, c)` across actual column values row-wise to create new membership degree columns.
 
-### Short notes — What “membership” means here
+## 4. Mamdani Rule Layer
 
-- A membership value (between 0 and 1) expresses how strongly a measurement belongs to a fuzzy set. Example: rel_load = +150 W might give μ_med=0.4 and μ_high=0.6 simultaneously.
+Rules combine fuzzified inputs using fuzzy operators:
 
-- These memberships feed the rules, which determine how much of the output sets (demand low/med/high) are activated before converting to the final demand index used for scheduling.
+- AND: `min`
+- OR: `max`
+- NOT: `1 - μ`
 
-- The demand index is a single score from 0 to 100 that summarizes "how demandy" this moment.
->>>>>>> c2d35afa1a8a0b19cec67e598a5a7103fbd50e97
+Derived outputs (each represented by multiple membership columns):
+
+- Energy waste (room-level + household aggregated).
+- Kitchen light efficiency (very_poor / fair / good / very_good).
+- Habit cost (price × activity interplay).
+- Overall efficiency (combines waste and habit cost with contextual time).
+
+To highlight inefficiency such as high lights during inactivity or night, and contextual price pressure.
+
+## 5. Defuzzification Methods
+
+Two crisp conversion strategies:
+
+1. Weighted Average: Map each label to a numeric weight (e.g., low=0.0, medium=0.5, high=1.0) and compute `(Σ μ_i * w_i) / (Σ μ_i)` per timestamp.
+2. Centroid (Mamdani):
+   - Define ideal output label shapes over universe U=[0,1].
+   - Clip each shape by its membership degree at the timestamp.
+   - Aggregate (max) clipped shapes into a composite fuzzy set.
+   - Compute centroid `∫ x * μ(x) dx / ∫ μ(x) dx`.
+
+Outputs: `*_score` (weighted) and `*_centroid` (centroid) numeric columns.
+
+## 6. Label Selection & Priority
+
+For each concept, the dominant fuzzy label is chosen with `argmax` across its membership columns. A composite priority metric (`waste_cost_priority = energy_waste_score * habit_cost_score`) highlights hours combining high waste and high cost pressure.
+
+## 7. Visualization
+
+Key plot types:
+
+- Membership function curves (line plots) for each variable.
+- Combined grid: histograms of real data with overlaid fuzzy membership lines.
+- Hourly average curves: group by `hour` and plot mean membership degrees per group (e.g., kitchen activity, lounge lights, time-of-day, price).
+- Defuzzification comparison plots: base label triangles, shaded clipped activations, and vertical lines for weighted vs centroid crisp values.
+
+Each defuzzification plot allows visual inspection of how fuzzy activations translate to final scores.
+
+## 8. Sensitivity Analysis & Sections
+
+The sensitivity cell quantifies how output metrics change when input memberships are perturbed. Sections 6.1 and 6.2 provide visual and tabular summaries of these sensitivity results.
+
+## 9. Usage Flow (Notebook Outline)
+
+1. Load and aggregate raw data.
+2. Define membership limits and fuzzify numeric columns.
+3. Plot membership sets (optional interpretability step).
+4. Compute Mamdani rule outputs with `compute_mamdani_rules`.
+5. Derive weighted-average scores and dominant labels.
+6. Build centroid scores for each concept.
+7. Summarize per hour (means) and compute composite priority.
+8. Select a representative row and visualize defuzzification.
+
+## 10. Dependencies
+
+Core libraries:
+
+- `pandas`, `numpy`, `matplotlib`
+  Optional:
+- `scikit-fuzzy` (for alternative rule formalism)
+
+Install example (conda environment):
+
+```
+conda install pandas numpy matplotlib
+conda install -c conda-forge scikit-fuzzy  # optional
+```
+
+## 11. Quick Start Summary
+
+Open `fuzzy_main.ipynb`, run cells top to bottom:
+
+1. Data load & aggregation.
+2. Membership definition & fuzzification.
+3. Rule computation.
+4. Weighted and centroid defuzzification.
+5. Visualization & summary inspection.
